@@ -56,6 +56,26 @@ re-uploaded before each compute. Any ggml port that reuses a graph across calls 
 
 ## Speed
 
-On this CPU, `htdemucs` separates at about 0.45x realtime. The CUDA build compiles for Pascal
-(`-DCMAKE_CUDA_ARCHITECTURES=61`), but the GPU numbers weren't measured: the P4000 test box
-rebooted into a kernel without its NVIDIA module partway through. TODO.
+On this CPU, `htdemucs` separates at about 0.45x realtime.
+
+## CUDA (Quadro P4000, sm_61)
+
+Measured 2026-09-25, same refs and test clip, `stems-parity --device gpu`. Every stem of every
+model passes at cosine 1.0000000:
+
+| model | check | drums | bass | other | vocals | guitar | piano | 20 s clip |
+|---|---|---|---|---|---|---|---|---|
+| htdemucs | full | 112.7 | 82.7 | 116.9 | 78.4 | | | 5.9 s |
+| htdemucs_6s | full | 117.8 | 82.5 | 112.2 | 75.3 | 76.5 | 80.2 | 7.5 s |
+| htdemucs_ft | full | 117.0 | 80.9 | 103.4 | 71.0 | | | 23.6 s |
+
+`htdemucs` runs at about 3.4x realtime here, about 7.5x the CPU build.
+
+### A stale build dir looks like a model bug
+
+Each backend builds into its own directory, so rebuilding one leaves the others on old code.
+On 2026-09-25 `build-cuda/` was still from before the positional-embedding fix above, and it
+produced stems that were mostly noise above 8 kHz and did not sum back to the mix (0.4 dB).
+The single-segment check still passed, because the bug only shows from the second segment on.
+Only the `full` check catches it. `build.sh` now warns when another build dir is older than
+the sources. Run `stems-parity --wav` on whichever build you are about to use.

@@ -22,3 +22,15 @@ cmake -S . -B "$DIR" -DCMAKE_BUILD_TYPE=Release "${FLAGS[@]}" "${EXTRA[@]}"
 JOBS="${JOBS:-4}"
 cmake --build "$DIR" --config Release --parallel "$JOBS"
 echo "[stems] built $BACKEND -> $DIR/bin/"
+
+# Backends live in separate dirs, so rebuilding one leaves the others on old code. A stale
+# build-cuda/ once shipped stems that were mostly noise; say so rather than let it happen quietly.
+newest_src=$(find src tools -type f -printf '%T@\n' | sort -n | tail -1)
+for other in build build-*; do
+  [ "$other" = "$DIR" ] && continue
+  bin="$other/bin/stems-split"
+  [ -x "$bin" ] || continue
+  if awk -v a="$(stat -c %Y "$bin")" -v b="$newest_src" 'BEGIN{exit !(a < b)}'; then
+    echo "[stems] WARNING: $other/ is older than the sources; rebuild it before use" >&2
+  fi
+done
