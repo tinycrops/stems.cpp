@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,12 @@ struct SeparateOptions {
     uint32_t seed = 0;
     // Called with (done, total) segment passes.
     std::function<void(int, int)> progress;
+    // Polled before every segment pass; returning true abandons the job with Cancelled.
+    std::function<bool()> should_cancel;
+};
+
+struct Cancelled : std::runtime_error {
+    Cancelled() : std::runtime_error("cancelled") {}
 };
 
 class HTDemucs {

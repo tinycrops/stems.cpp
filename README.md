@@ -68,6 +68,37 @@ and poll shape is audiocraft.cpp's, so gary4juce can reuse the client code it al
 terry. One job at a time. The model stays resident between requests and swaps when a different
 one is asked for.
 
+## C ABI (libstems)
+
+For embedding in a host (a JUCE/iPlug2 plugin, the iOS app, Tauri over FFI), the build also
+produces `libstems.so` / `stems.dll` / `libstems.dylib`, or `libstems.a` with `-DSTEMS_STATIC=ON`
+(forced on for iOS). The contract is `src/libstems_v1.h`. It is built the same way as sa3.cpp's
+`libsa3_v1.h`: one exported symbol, `stems_get_api(STEMS_ABI_VERSION_1)`, returns a function
+table. Structs are size-tagged (zero, set `size`, call the `*_init`, then fill in). The library
+owns results and you free them with `result_free`. Progress and cancel are callbacks.
+
+```c
+const stems_api_v1* api = stems_get_api(STEMS_ABI_VERSION_1);
+stems_context_config_v1 cfg = {sizeof cfg}; api->context_config_init(&cfg);
+cfg.model_path = "models/htdemucs-f32.gguf";
+stems_context* ctx; stems_error_v1 err = {sizeof err};
+api->context_create(&cfg, &ctx, &err);
+
+stems_request_v1 req = {sizeof req}; api->request_init(&req);
+req.input.samples = buf; req.input.n_samples = n; req.input.n_channels = 2;
+req.input.sample_rate = 48000; req.input.layout = STEMS_AUDIO_INTERLEAVED_V1;
+stems_result_v1 res = {sizeof res}; api->result_init(&res);
+api->separate(ctx, &req, &res, &err);   /* res.samples: [source][channel][sample] at 48 kHz */
+api->result_free(&res);
+api->context_destroy(ctx);
+```
+
+Input can be any rate, any channel count, planar or interleaved. Stems come back at the input's
+sample rate and exact length, so a host never resamples. ggml is linked in statically and kept
+private: `stems_get_api` is the only exported symbol, so a plugin can load libstems next to
+libsa3 without their ggml copies colliding. `tools/stems-libtest.c` is a complete example in
+plain C. Its output is byte-identical to `stems-split --float32`.
+
 ## How it's put together
 
 - `src/htdemucs.cpp` holds the network as one ggml graph per 7.8 s segment: freq branch, time branch,

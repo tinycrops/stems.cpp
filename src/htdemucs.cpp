@@ -581,6 +581,7 @@ std::vector<float> HTDemucs::separate(const float* mix_in, int len, const Separa
             std::vector<float> out((size_t)S * C * v.length, 0.0f);
             std::vector<float> sum_w(v.length, 0.0f);
             for (int off = 0; off < v.length; off += stride) {
+                if (opt.should_cancel && opt.should_cancel()) throw Cancelled();
                 View chunk{v.buf, v.total, v.offset + off, std::min(seg, v.length - off)};
                 padded(chunk, seg, seg_in);
                 P.run(*g, seg_in.data(), seg_out.data());

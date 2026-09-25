@@ -13,6 +13,7 @@ endif()
 
 # Put our binaries next to the ggml DLLs so tools run without PATH juggling.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Backend toggles (forwarded to the ggml submodule).
 option(STEMS_CUDA   "Build the GGML CUDA backend"     OFF)
@@ -21,6 +22,12 @@ option(STEMS_METAL  "Build the GGML Metal backend"    OFF)
 option(STEMS_HIP    "Build the GGML HIP/ROCm backend" OFF)
 
 option(STEMS_BUILD_TOOLS "Build the CLI tools and tests" ON)
+option(STEMS_STATIC "Build libstems as a static library (for embedding in an app binary)" OFF)
+
+# ggml is linked statically into everything, including libstems.so/.dll, so a host ships one
+# file. That needs position-independent objects throughout.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(STEMS_CUDA)
     set(GGML_CUDA ON CACHE BOOL "" FORCE)
@@ -107,10 +114,39 @@ add_subdirectory(ggml)
 add_library(stems STATIC src/htdemucs.cpp)
 target_include_directories(stems PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(stems PUBLIC ggml)
+set_target_properties(stems PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# --- libstems: C ABI library (embed stems in a host app; see src/libstems_v1.h) -------------
+# Windows: stems.dll + stems.lib (import lib).  Linux/macOS: libstems.so / libstems.dylib.
+# STEMS_STATIC (forced on for iOS) builds libstems.a instead, to link straight into an app.
+# Only stems_get_api is exported: ggml is linked in statically and kept private, so a host
+# that also loads sa3 or audiocraft (each with its own ggml) cannot have symbols cross over.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(STEMS_STATIC ON CACHE BOOL "" FORCE)
+endif()
+if(STEMS_STATIC)
+    add_library(stems_shared STATIC src/libstems.cpp)
+else()
+    add_library(stems_shared SHARED src/libstems.cpp)
+    set_target_properties(stems_shared PROPERTIES C_VISIBILITY_PRESET hidden
+                          CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    if(APPLE)
+        target_link_options(stems_shared PRIVATE "LINKER:-exported_symbol,_stems_get_api")
+    elseif(UNIX)
+        target_link_options(stems_shared PRIVATE "LINKER:--exclude-libs,ALL")
+    endif()
+endif()
+set_target_properties(stems_shared PROPERTIES OUTPUT_NAME stems)
+target_link_libraries(stems_shared PRIVATE stems)
 
 if(STEMS_BUILD_TOOLS)
     add_executable(stems-split tools/stems-split.cpp)
     target_link_libraries(stems-split PRIVATE stems)
+
+    # Pure C on purpose: proves the public header is C-clean and links through the ABI only.
+    add_executable(stems-libtest tools/stems-libtest.c)
+    target_include_directories(stems-libtest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(stems-libtest PRIVATE stems_shared)
 
     add_executable(stems-parity tools/stems-parity.cpp)
     target_link_libraries(stems-parity PRIVATE stems)
