@@ -1,0 +1,9 @@
+build*/
+!build.sh
+!build.cmd
+models/*.gguf
+tests/refs/
+tests/data/*.wav
+.venv*/
+cuda-build.log
+tests/data/
